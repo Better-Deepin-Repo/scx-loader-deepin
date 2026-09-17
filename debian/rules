@@ -1,0 +1,82 @@
+#!/usr/bin/make -f
+# Copyright (C) 2026 LFRon <ronforever@outlook.com>
+# Released under the GNU General Public License version 2 or later.
+#
+# Cargo workspace application package of the sched-ext "scx-loader"
+# project (debhelper 13 + 3.0 quilt + architecture.mk, per the Debian
+# Rust Team book process-workspace guidance).
+#
+# Rust dependency sourcing (Better-Deepin scheme, same as scx-deepin):
+#   debian/control carries no crate (librust-*-dev) build dependencies.
+#   The configure step first runs debian/fetch-vendor.sh, which downloads
+#   every crate pinned by Cargo.lock from crates.io into ./vendor - the
+#   single, deliberately scripted online step of the build (the
+#   Better-Deepin OBS builder permits network access).  Everything after
+#   that is offline: debian/cargo-config.toml is rendered into
+#   $CARGO_HOME/config.toml, replacing crates-io with ./vendor and
+#   setting [net] offline = true, so `cargo build` and `cargo test`
+#   never touch the network.  The upstream .cargo/config.toml (xtask
+#   alias) stays untouched; the configuration lives in CARGO_HOME only.
+#   Because no crate comes from a Debian package, no Built-Using /
+#   Static-Built-Using is recorded.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/default.mk
+include /usr/share/rustc/architecture.mk
+
+PKG = scx-loader
+
+# cc/bindgen-free C links notwithstanding, these flags must exist for
+# dpkg-buildflags consumers; tolerate manual debian/rules invocations
+# outside dpkg-buildpackage.
+CFLAGS ?= $(shell dpkg-buildflags --get CFLAGS)
+CXXFLAGS ?= $(shell dpkg-buildflags --get CXXFLAGS)
+CPPFLAGS ?= $(shell dpkg-buildflags --get CPPFLAGS)
+LDFLAGS ?= $(shell dpkg-buildflags --get LDFLAGS)
+export CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+
+export DEB_HOST_RUST_TYPE
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+
+# Artifacts land under the explicit rust target triple passed below.
+CARGO_TARGET_DIR = target/$(DEB_HOST_RUST_TYPE)/release
+
+%:
+	dh $@
+
+# The only networked step: pre-fetch all locked crates into ./vendor,
+# then let the rendered cargo config enforce offline building.
+execute_before_dh_auto_configure:
+	debian/fetch-vendor.sh
+	mkdir -p $(CARGO_HOME)
+	sed -e 's#@VENDOR_DIR@#$(CURDIR)/vendor#' debian/cargo-config.toml > $(CARGO_HOME)/config.toml
+
+override_dh_auto_build:
+	cargo build --release --target $(DEB_HOST_RUST_TYPE) \
+		--workspace --exclude xtask
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	cargo test --release --target $(DEB_HOST_RUST_TYPE) \
+		--workspace --exclude xtask
+endif
+
+override_dh_auto_install:
+	# Binaries (as installed by upstream README / xtask install)
+	install -Dm755 $(CARGO_TARGET_DIR)/scx_loader $(CURDIR)/debian/$(PKG)/usr/bin/scx_loader
+	install -Dm755 $(CARGO_TARGET_DIR)/scxctl $(CURDIR)/debian/$(PKG)/usr/bin/scxctl
+	install -Dm755 $(CARGO_TARGET_DIR)/scxtui $(CURDIR)/debian/$(PKG)/usr/bin/scxtui
+	# systemd unit (enabled by dh_installsystemd via [Install] section)
+	install -Dm644 services/scx_loader.service $(CURDIR)/debian/$(PKG)/usr/lib/systemd/system/scx_loader.service
+	install -Dm644 services/org.scx.Loader.service $(CURDIR)/debian/$(PKG)/usr/share/dbus-1/system-services/org.scx.Loader.service
+	# D-Bus activation policy and introspection interface
+	install -Dm644 configs/org.scx.Loader.conf $(CURDIR)/debian/$(PKG)/usr/share/dbus-1/system.d/org.scx.Loader.conf
+	install -Dm644 configs/org.scx.Loader.xml $(CURDIR)/debian/$(PKG)/usr/share/dbus-1/interfaces/org.scx.Loader.xml
+	# polkit action definitions
+	install -Dm644 configs/org.scx.Loader.policy $(CURDIR)/debian/$(PKG)/usr/share/polkit-1/actions/org.scx.Loader.policy
+	# example configuration
+	install -Dm644 configs/scx_loader.toml $(CURDIR)/debian/$(PKG)/usr/share/scx_loader/config.toml
+
+override_dh_auto_clean:
+	rm -rf target vendor debian/cargo_home debian/cargo_registry
+	rm -f debian/cargo-network-fallback

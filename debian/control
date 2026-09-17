@@ -1,0 +1,34 @@
+Source: scx-loader
+Section: admin
+Priority: optional
+Maintainer: LFRon <ronforever@outlook.com>
+Build-Depends: debhelper-compat (= 13)
+Build-Depends-Arch:
+ cargo:native <!nocheck>,
+ rustc:native (>= 1.85) <!nocheck>,
+ libstd-rust-dev <!nocheck>,
+Standards-Version: 4.7.3
+Homepage: https://github.com/sched-ext/scx-loader
+Rules-Requires-Root: binary-targets
+
+Package: scx-loader
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ dbus,
+ polkitd
+Description: DBUS on-demand loader of sched-ext schedulers
+ scx_loader is a D-Bus activated systemd service that loads and manages
+ sched_ext CPUschedulers on Linux. It lets desktop environments and other
+ frontends switch schedulers at runtime and control their tuning
+ parameters over D-Bus (interface org.scx.Loader), with polkit used for
+ authorization.
+ .
+ This package provides:
+  * scx_loader, the D-Bus daemon;
+  * scxctl, a command line client for the daemon;
+  * scxtui, a terminal user interface client;
+  * the systemd service, D-Bus service/activation, interface XML,
+    system bus policy and polkit action files, plus an example
+    configuration in /usr/share/scx_loader/config.toml.
